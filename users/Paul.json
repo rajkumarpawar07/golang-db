@@ -1,0 +1,12 @@
+{
+	"Name": "Paul",
+	"Age": 25,
+	"Contact": "32874732",
+	"Company": "Myrl Tech",
+	"Address": {
+		"City": "bangalore",
+		"State": "karnataka",
+		"Country": "india",
+		"Pincode": 410013
+	}
+}

@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"github.com/gofiber/fiber/v2"
 	"github.com/jcelliott/lumber"
+
 )
 
 const Version = "1.0.0"
@@ -98,7 +100,6 @@ func (d *Driver) Write(collection, resource string, v interface{}) error {
 }
 
 func (d *Driver) Read(collection, resource string, v interface{}) error {
-
 	if collection == "" {
 		return fmt.Errorf("Missing collection - unable to read!")
 	}
@@ -107,19 +108,20 @@ func (d *Driver) Read(collection, resource string, v interface{}) error {
 		return fmt.Errorf("Missing resource - unable to read record (no name)!")
 	}
 
-	record := filepath.Join(d.dir, collection, resource)
+	record := filepath.Join(d.dir, collection, resource + ".json") // Ensure only one .json extension
 
 	if _, err := stat(record); err != nil {
 		return err
 	}
 
-	b, err := ioutil.ReadFile(record + ".json")
+	b, err := ioutil.ReadFile(record)
 	if err != nil {
 		return err
 	}
 
 	return json.Unmarshal(b, &v)
 }
+
 
 func (d *Driver) ReadAll(collection string) ([]string, error) {
 
@@ -206,6 +208,7 @@ type User struct {
 }
 
 func main() {
+	app := fiber.New()
 	dir := "./"
 
 	db, err := New(dir, nil)
@@ -213,47 +216,124 @@ func main() {
 		fmt.Println("Error", err)
 	}
 
-	employees := []User{
-		{"John", "23", "23344333", "Myrl Tech", Address{"bangalore", "karnataka", "india", "410013"}},
-		{"Paul", "25", "23344333", "Google", Address{"san francisco", "california", "USA", "410013"}},
-		{"Robert", "27", "23344333", "Microsoft", Address{"bangalore", "karnataka", "india", "410013"}},
-		{"Vince", "29", "23344333", "Facebook", Address{"bangalore", "karnataka", "india", "410013"}},
-		{"Neo", "31", "23344333", "Remote-Teams", Address{"bangalore", "karnataka", "india", "410013"}},
-		{"Albert", "32", "23344333", "Dominate", Address{"bangalore", "karnataka", "india", "410013"}},
-	}
+	// employees := []User{
+	// 	{"John", "23", "23344333", "Myrl Tech", Address{"bangalore", "karnataka", "india", "410013"}},
+	// 	{"Paul", "25", "23344333", "Google", Address{"san francisco", "california", "USA", "410013"}},
+	// 	{"Robert", "27", "23344333", "Microsoft", Address{"bangalore", "karnataka", "india", "410013"}},
+	// 	{"Vince", "29", "23344333", "Facebook", Address{"bangalore", "karnataka", "india", "410013"}},
+	// 	{"Neo", "31", "23344333", "Remote-Teams", Address{"bangalore", "karnataka", "india", "410013"}},
+	// 	{"Albert", "32", "23344333", "Dominate", Address{"bangalore", "karnataka", "india", "410013"}},
+	// }
 
-	for _, value := range employees {
-		db.Write("users", value.Name, User{
-			Name:    value.Name,
-			Age:     value.Age,
-			Contact: value.Contact,
-			Company: value.Company,
-			Address: value.Address,
-		})
-	}
+	// for _, value := range employees {
+	// 	db.Write("users", value.Name, User{
+	// 		Name:    value.Name,
+	// 		Age:     value.Age,
+	// 		Contact: value.Contact,
+	// 		Company: value.Company,
+	// 		Address: value.Address,
+	// 	})
+	// }
 
-	records, err := db.ReadAll("users")
-	if err != nil {
-		fmt.Println("Error", err)
-	}
-	fmt.Println(records)
+	app.Post("/addUser", func(c *fiber.Ctx) error {
+		var user User
 
-	allusers := []User{}
-
-	for _, f := range records {
-		employeeFound := User{}
-		if err := json.Unmarshal([]byte(f), &employeeFound); err != nil {
-			fmt.Println("Error", err)
+		if err := c.BodyParser(&user); err != nil {
+			return c.Status(400).SendString("Error parsing request body")
 		}
-		allusers = append(allusers, employeeFound)
-	}
-	fmt.Println((allusers))
+
+		if err := db.Write("users", user.Name, user); err != nil {
+			return c.Status(500).SendString("Error saving user data")
+		}
+
+		return c.Status(201).JSON(user)
+	})
+
+	app.Delete("/deleteUser/:name", func(c *fiber.Ctx) error {
+		name := c.Params("name")
+	
+		if name == "" {
+			return c.Status(400).SendString("Name parameter is required")
+		}
+	
+		if err := db.Delete("users", name); err != nil {
+			return c.Status(500).SendString("Error deleting user data")
+		}
+	
+		return c.SendString("User deleted successfully")
+	})
+
+
+	app.Delete("/deleteAllUsers", func(c *fiber.Ctx) error {
+		if err := db.Delete("users", ""); err != nil {
+			return c.Status(500).SendString("Error deleting all user data")
+		}
+	
+		return c.SendString("All users deleted successfully")
+	})
+
+
+	app.Get("/getUser/:name", func(c *fiber.Ctx) error {
+		name := c.Params("name")
+	
+		if name == "" {
+			return c.Status(400).SendString("Name parameter is required")
+		}
+	
+		var user User
+		if err := db.Read("users", name, &user); err != nil {
+			// Log the error and return a detailed message
+			return c.Status(500).SendString(fmt.Sprintf("Error retrieving user data: %v", err))
+		}
+	
+		return c.JSON(user)
+	})
+
+	app.Get("/getAllUsers", func(c *fiber.Ctx) error {
+		records, err := db.ReadAll("users")
+		if err != nil {
+			return c.Status(500).SendString("Error retrieving all users")
+		}
+	
+		var allUsers []User
+		for _, record := range records {
+			var user User
+			if err := json.Unmarshal([]byte(record), &user); err != nil {
+				return c.Status(500).SendString("Error parsing user data")
+			}
+			allUsers = append(allUsers, user)
+		}
+	
+		return c.JSON(allUsers)
+	})
+	
+	
+
+
+	app.Listen(":3000")
+
+	// records, err := db.ReadAll("users")
+	// if err != nil {
+	// 	fmt.Println("Error", err)
+	// }
+	// fmt.Println(records)
+
+	// allusers := []User{}
+
+	// for _, f := range records {
+	// 	employeeFound := User{}
+	// 	if err := json.Unmarshal([]byte(f), &employeeFound); err != nil {
+	// 		fmt.Println("Error", err)
+	// 	}
+	// 	allusers = append(allusers, employeeFound)
+	// }
+	// fmt.Println((allusers))
 
 	// if err := db.Delete("users", "John"); err != nil {
 	// 	fmt.Println("Error", err)
 	// }
 
-	if err := db.Delete("users", ""); err != nil {
-		fmt.Println("Error", err)
-	}
+	// if err := db.Delete("users", ""); err != nil {
+	// 	fmt.Println("Error", err)
+	// }
 }
