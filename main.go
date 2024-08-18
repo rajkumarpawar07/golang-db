@@ -4,12 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
-	"github.com/gofiber/fiber/v2"
-	"github.com/jcelliott/lumber"
+	"archive/zip"
+	"io"
 
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/jcelliott/lumber"
 )
 
 const Version = "1.0.0"
@@ -108,7 +112,13 @@ func (d *Driver) Read(collection, resource string, v interface{}) error {
 		return fmt.Errorf("Missing resource - unable to read record (no name)!")
 	}
 
-	record := filepath.Join(d.dir, collection, resource + ".json") // Ensure only one .json extension
+	// Decode the resource name if needed
+	decodedResource, err := url.QueryUnescape(resource)
+	if err != nil {
+		return fmt.Errorf("Error decoding resource name: %v", err)
+	}
+
+	record := filepath.Join(d.dir, collection, decodedResource + ".json") // Ensure only one .json extension
 
 	if _, err := stat(record); err != nil {
 		return err
@@ -207,8 +217,70 @@ type User struct {
 	Address Address
 }
 
+// Function to zip the users folder
+func zipFolder(source, target string) error {
+	zipFile, err := os.Create(target)
+	if err != nil {
+		return err
+	}
+	defer zipFile.Close()
+
+	archive := zip.NewWriter(zipFile)
+	defer archive.Close()
+
+	filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Get the relative path of the file
+		relPath, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+
+		// Set the header name to the relative path
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return err
+		}
+		header.Name = relPath
+
+		if info.IsDir() {
+			header.Name += "/"
+		} else {
+			header.Method = zip.Deflate
+		}
+
+		writer, err := archive.CreateHeader(header)
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		_, err = io.Copy(writer, file)
+		return err
+	})
+
+	return nil
+}
+
+
 func main() {
 	app := fiber.New()
+    
+	// Default CORS config allows all origins
+    app.Use(cors.New())
+
 	dir := "./"
 
 	db, err := New(dir, nil)
@@ -275,6 +347,7 @@ func main() {
 
 	app.Get("/getUser/:name", func(c *fiber.Ctx) error {
 		name := c.Params("name")
+		
 	
 		if name == "" {
 			return c.Status(400).SendString("Name parameter is required")
@@ -306,7 +379,26 @@ func main() {
 	
 		return c.JSON(allUsers)
 	})
-	
+
+	// app.Get("/downloadDB", func(c *fiber.Ctx) error {
+	// 	return c.Download("C:\\Users\\Rajkumar\\Desktop\\go_tutorials\\database\\users\\Rajkumar Pawar.json")
+	// })
+
+	// Route to download the entire database
+app.Get("/downloadDB", func(c *fiber.Ctx) error {
+	// Define source folder and target zip file
+	sourceFolder := "./users"
+	zipFile := "./users_database.zip"
+
+	// Create the zip file
+	err := zipFolder(sourceFolder, zipFile)
+	if err != nil {
+		return c.Status(500).SendString("Failed to zip the database")
+	}
+
+	// Serve the zip file
+	return c.Download(zipFile)
+})
 	
 
 
