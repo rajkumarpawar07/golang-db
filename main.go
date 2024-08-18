@@ -307,6 +307,10 @@ func main() {
 	// 	})
 	// }
 
+	app.Get("/", func(c *fiber.Ctx) error {
+		return c.SendString("Welcome to the database server")
+	})
+
 	app.Post("/addUser", func(c *fiber.Ctx) error {
 		var user User
 
